@@ -1,7 +1,6 @@
-#include <iostream>
-#include <boost/filesystem.hpp>
+#include "CloudClient.hpp"
 int main()
 {
-	boost::filesystem::path path = "./abc/de.txt";
-	std::cout << path.extension() << std::endl;
+	CloudCLient client;
+	client.Start();
 }
