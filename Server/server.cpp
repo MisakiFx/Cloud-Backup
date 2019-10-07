@@ -9,7 +9,7 @@
 #define SERVER_BASE_DIR "www"
 #define SERVER_ADDR "0.0.0.0"
 #define SERVER_PORT 9000
-#define SERVER_BACKUO_DIR SERVER_BASE_DIR"/list/"
+#define SERVER_BACKUP_DIR SERVER_BASE_DIR"/list/"
 namespace bf = boost::filesystem;
 using namespace httplib;
 class CloudServer
@@ -22,7 +22,7 @@ class CloudServer
       {
         bf::create_directory(base_path);
       }
-      bf::path list_path(SERVER_BACKUO_DIR);
+      bf::path list_path(SERVER_BACKUP_DIR);
       if(!bf::exists(list_path))
       {
         bf::create_directory(list_path);
@@ -42,7 +42,7 @@ class CloudServer
     //获取文件列表
     static void GetFileList(const Request& req, Response& rsp)
     {
-      bf::path list(SERVER_BACKUO_DIR);
+      bf::path list(SERVER_BACKUP_DIR);
       bf::directory_iterator item_begin(list);
       bf::directory_iterator item_end;
       std::string body;
@@ -105,6 +105,7 @@ class CloudServer
     //起始位置解析
     static bool RangeParse(std::string& range, int64_t& start)
     {
+      //Range:bytes=start-end
       size_t pos1 = range.find("=");
       size_t pos2 = range.find("-");
       if(pos1 == std::string::npos || pos2 == std::string::npos)
