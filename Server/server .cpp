@@ -6,6 +6,8 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <unistd.h>
+#include <fcntl.h>
 #define SERVER_BASE_DIR "www"
 #define SERVER_ADDR "0.0.0.0"
 #define SERVER_PORT 9000
@@ -83,24 +85,26 @@ class CloudServer
         rsp.status = 400;
         return;
       }
+      std::cout << "backup file:[" << req.path << "] range:[" << range << "]" <<  std::endl;
       std::string realpath = SERVER_BASE_DIR + req.path;
-      std::ofstream file(realpath, std::ios::binary | std::ios::trunc);
-      //文件未成功打开
-      if(!file.is_open())
+      //std::ofstream file(realpath, std::ios::binary | std::ios::trunc);
+      int fd = open(realpath.c_str(), O_CREAT | O_WRONLY, 0664);
+      if(fd < 0)
       {
         std::cerr << "open file " << realpath << " error" << std::endl;
         rsp.status = 500;
         return;
       }
-      file.seekp(range_start, std::ios::beg);
-      file.write(&req.body[0], req.body.size());
-      if(!file.good())
+      //文件未成功打开
+      lseek(fd, range_start, SEEK_SET);
+      size_t ret = write(fd, &req.body[0], req.body.size());
+      if(ret != req.body.size())
       {
         std::cerr << "file write body error" << std::endl;
         rsp.status = 500;
         return;
       }
-      file.close();
+      close(fd);
     }
     //起始位置解析
     static bool RangeParse(std::string& range, int64_t& start)
@@ -119,6 +123,7 @@ class CloudServer
       rs >> start;
       return true;
     }
+    
     //获取文件数据
     static void GetFileData(const Request& req, Response& rsp)
     {
@@ -148,7 +153,7 @@ class CloudServer
         rsp.status = 500;
         return;
       }
-      rsp.set_content(body, "text/plain");
+      rsp.set_content(body, "application/octet-stream");
     }
     static void BackupFile(const Request& req, Response& rsp)
     {

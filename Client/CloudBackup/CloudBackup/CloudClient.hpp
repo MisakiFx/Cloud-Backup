@@ -8,8 +8,8 @@
 #include <sstream>
 #include <thread>
 #include "httplib.h"
-#define CLIENT_BACKUP_DIR "backup"
-#define CLIENT_BACKUP_INFO_FILE "back.list"
+#define CLIENT_BACKUP_DIR ".\\backup"
+#define CLIENT_BACKUP_INFO_FILE ".\\back.list"
 #define RANGE_MAX_SIZE (10 << 20)//分块大小
 #define SERVER_IP "192.168.61.128"
 #define SERVER_PORT 9000
@@ -63,14 +63,13 @@ public:
 		tmp << "bytes=" << _range_start << "-" << (_range_start + _range_len - 1);
 		hdr.insert(std::make_pair("Range", tmp.str()));
 		auto rsp = cli.Put(uri.c_str(), hdr, body, "text/plain");
-		if (rsp->status == 200)
-		{
-			_res = true;
-		}
-		else
+		if (rsp && rsp->status != 200)
 		{
 			_res = false;
 		}
+		std::stringstream ss;
+		ss << "backup file [" << _file << "] range:[" << _range_start << "-" << _range_len << "] backup success!" << std::endl;
+		std::cout << ss.str();
 		return;
 	}
 };
@@ -162,7 +161,8 @@ private:
 	//监听目录获取目录文件信息，并且刷新备份信息
 	bool BackupDirListen(const std::string& path)
 	{
-		bf::directory_iterator item_begin(CLIENT_BACKUP_DIR);
+		bf::path file(path);
+		bf::directory_iterator item_begin(file);
 		bf::directory_iterator item_end;
 		//遍历目录
 		for (; item_begin != item_end; item_begin++)
@@ -190,6 +190,7 @@ private:
 		}
 		return true;
 	}
+
 	//更新备份信息etag到backup_list
 	bool AddBackupInfo(const std::string& file)
 	{
@@ -217,28 +218,35 @@ private:
 		std::vector<ThrBackUp> thr_res;
 		std::vector<std::thread> thr_list;
 		//分块创建线程传输文件
-		for (int i = 0; i < count; i++)
+		std::cout << "file:[" << file << "] fsize:[" << fsize << "] count:[" << count + 1 << "]" << std::endl;
+		for (int i = 0; i <= count; i++)
 		{
 			int64_t range_start = i * RANGE_MAX_SIZE;
-			int64_t range_end = (i + 1) * RANGE_MAX_SIZE;
-			if (i == (count - 1))
+			int64_t range_end = ((i + 1) * RANGE_MAX_SIZE) - 1;
+			if (i == count)
 			{
-				range_end += (fsize % RANGE_MAX_SIZE);
+				range_end = fsize - 1;
 			}
 			int64_t range_len = range_end - range_start + 1;
+			std::cout << "file:[" << file << "] range:[" << range_start << "-" << range_end << "]-" << range_len << std::endl;
 			ThrBackUp backip_info(file, range_start, range_len);
 			thr_res.push_back(backip_info);
+			//thr_list.push_back(std::thread(thr_start, &thr_res[i]));
+		}
+		for (int i = 0; i <= count; i++)
+		{
 			thr_list.push_back(std::thread(thr_start, &thr_res[i]));
 		}
 		//等待每个线程结束，根据结果判断是否传输成功
 		bool ret = true;
-		for (int i = 0; i < count; i++)
+		for (int i = 0; i <= count; i++)
 		{
 			thr_list[i].join();
-			if (thr_res[i]._res == false)
+			if (thr_res[i]._res == true)
 			{
-				ret = false;
+				continue;
 			}
+			ret = false;
 		}
 		if (ret == false)
 		{
@@ -296,6 +304,7 @@ public:
 			BackupDirListen(CLIENT_BACKUP_DIR);
 			//3、备份文件信息
 			SetBackupInfo();
+			Sleep(3000);
 		}
 		return true;
 	}
