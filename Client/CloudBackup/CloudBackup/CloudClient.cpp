@@ -1,6 +1,6 @@
 #include "CloudClient.hpp"
 int main()
 {
-	CloudCLient client;
+	CloudClient client;
 	client.Start();
 }

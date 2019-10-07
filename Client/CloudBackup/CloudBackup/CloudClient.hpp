@@ -15,7 +15,66 @@
 #define SERVER_PORT 9000
 #define BACKUP_URI "/list/"
 namespace bf = boost::filesystem;
-class CloudCLient
+
+
+class ThrBackUp
+{
+private:
+	std::string _file;
+	int64_t _range_start;//数据起始位置
+	int64_t _range_len;//数据长度
+public:
+	bool _res;
+public:
+	ThrBackUp(const std::string& file, int64_t start, int64_t len)
+		:_res(true)
+		,_file(file)
+		,_range_start(start)
+		,_range_len(len)
+	{
+
+	}
+	 void Start()
+	{
+		std::ifstream path(_file, std::ios::binary);
+		if (!path.is_open())
+		{
+			std::cerr << "range backup file " << _file << " error" << std::endl;
+			_res = false;
+			return;
+		}
+		path.seekg(_range_start, std::ios::beg);
+		std::string body;
+		body.resize(_range_len);
+		path.read(&body[0], _range_len);
+		if (!path.good())
+		{
+			std::cerr << "read file " << _file << " range data error" << std::endl;
+			_res = false;
+			return;
+		}
+		path.close();
+		bf::path name(_file);
+		std::string uri = BACKUP_URI + name.filename().string();
+		httplib::Client cli(SERVER_IP, SERVER_PORT);
+		httplib::Headers hdr;
+		hdr.insert(std::make_pair("Content-Length", std::to_string(_range_len)));
+		std::stringstream tmp;
+		tmp << "bytes=" << _range_start << "-" << (_range_start + _range_len - 1);
+		hdr.insert(std::make_pair("Range", tmp.str()));
+		auto rsp = cli.Put(uri.c_str(), hdr, body, "text/plain");
+		if (rsp->status == 200)
+		{
+			_res = true;
+		}
+		else
+		{
+			_res = false;
+		}
+		return;
+	}
+};
+class CloudClient
 {
 private:
 	//filename etag
@@ -77,7 +136,7 @@ private:
 		}
 		return true;
 	}
-	//保存文件备份信息
+	//向文件中保存文件备份信息
 	bool SetBackupInfo()
 	{
 		std::string body;
@@ -119,8 +178,8 @@ private:
 			{
 				continue;
 			}
+			std::cout << "file:[" << item_begin->path().string() << "] need backup" << std::endl;
 			//判断上传是否成功
-			
 			if (PutFileData(item_begin->path().string()) == false)
 			{
 				continue;
@@ -155,7 +214,7 @@ private:
 			return false;
 		}
 		int count = fsize / RANGE_MAX_SIZE;
-		std::vector<bool> thr_res(count);
+		std::vector<ThrBackUp> thr_res;
 		std::vector<std::thread> thr_list;
 		//分块创建线程传输文件
 		for (int i = 0; i < count; i++)
@@ -167,14 +226,16 @@ private:
 				range_end += (fsize % RANGE_MAX_SIZE);
 			}
 			int64_t range_len = range_end - range_start + 1;
-			thr_list.push_back(std::thread(thr_start, file));
+			ThrBackUp backip_info(file, range_start, range_len);
+			thr_res.push_back(backip_info);
+			thr_list.push_back(std::thread(thr_start, &thr_res[i]));
 		}
 		//等待每个线程结束，根据结果判断是否传输成功
 		bool ret = true;
 		for (int i = 0; i < count; i++)
 		{
 			thr_list[i].join();
-			if (thr_res[i] == false)
+			if (thr_res[i]._res == false)
 			{
 				ret = false;
 			}
@@ -188,45 +249,9 @@ private:
 		return true;
 	}
 	//线程入口函数，在里面传输每一块文件数据
-	static void thr_start(const std::string& file)
+	static void thr_start(ThrBackUp* backup_info)
 	{
-		/*
-		std::ifstream path(file, std::ios::binary);
-		if (!path.is_open())
-		{
-			std::cerr << "range backup file " << file << " error" << std::endl;
-			*res = false;
-			return;
-		}
-		path.seekg(start, std::ios::beg);
-		std::string body;
-		body.resize(len);
-		path.read(&body[0], len);
-		if (!path.good())
-		{
-			std::cerr << "read file " << file << " range data error" << std::endl;
-			*res = false;
-			return;
-		}
-		path.close();
-		bf::path name(file);
-		std::string uri = BACKUP_URI + name.filename().string();
-		httplib::Client cli(SERVER_IP, SERVER_PORT);
-		httplib::Headers hdr;
-		hdr.insert(std::make_pair("Content-Length", std::to_string(len)));
-		std::stringstream tmp;
-		tmp << "bytes=" << start << "-" << start + len - 1;
-		hdr.insert(std::make_pair("Range", tmp.str()));
-		auto rsp = cli.Put(uri.c_str(), hdr, body, "text/plain");
-		if (rsp->status == 200)
-		{
-			*res = true;
-		}
-		else
-		{
-			*res = false;
-		}
-		*/
+		backup_info->Start();
 		return;
 	}
 	//判断文件是否需要备份
@@ -273,5 +298,14 @@ public:
 			SetBackupInfo();
 		}
 		return true;
+	}
+	CloudClient()
+	{
+		//备份文件夹不存在，创建文件夹
+		bf::path file(CLIENT_BACKUP_DIR);
+		if (!bf::exists(file))
+		{
+			bf::create_directory(file);
+		}
 	}
 };
