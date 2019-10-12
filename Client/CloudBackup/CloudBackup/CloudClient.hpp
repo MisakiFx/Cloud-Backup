@@ -11,7 +11,7 @@
 #define CLIENT_BACKUP_DIR ".\\backup"
 #define CLIENT_BACKUP_INFO_FILE ".\\back.list"
 #define RANGE_MAX_SIZE (10 << 20)//·Ö¿é´óÐ¡
-#define SERVER_IP "192.168.61.128"
+#define SERVER_IP "192.168.239.128"
 #define SERVER_PORT 9000
 #define BACKUP_URI "/list/"
 namespace bf = boost::filesystem;
@@ -63,9 +63,13 @@ public:
 		tmp << "bytes=" << _range_start << "-" << (_range_start + _range_len - 1);
 		hdr.insert(std::make_pair("Range", tmp.str()));
 		auto rsp = cli.Put(uri.c_str(), hdr, body, "text/plain");
-		if (rsp && rsp->status != 200)
+		if (!rsp || rsp->status != 200)
 		{
 			_res = false;
+			std::stringstream ss;
+			ss << "backup file [" << _file << "] range:[" << _range_start << "-" << _range_len << "] backup failed!" << std::endl;
+			std::cout << ss.str();
+			return;
 		}
 		std::stringstream ss;
 		ss << "backup file [" << _file << "] range:[" << _range_start << "-" << _range_len << "] backup success!" << std::endl;
@@ -251,6 +255,7 @@ private:
 		if (ret == false)
 		{
 			//AddBackupInfo(file);
+			std::cout << "file:[" << file << "] backup failed" << std::endl;
 			return false;
 		}
 		std::cout << "file:[" << file << "] backup success" << std::endl;
