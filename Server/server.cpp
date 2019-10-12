@@ -8,12 +8,14 @@
 #include <fstream>
 #include <unistd.h>
 #include <fcntl.h>
+#include "compress.hpp"
 #define SERVER_BASE_DIR "www"
 #define SERVER_ADDR "0.0.0.0"
 #define SERVER_PORT 9000
 #define SERVER_BACKUP_DIR SERVER_BASE_DIR"/list/"
 namespace bf = boost::filesystem;
 using namespace httplib;
+CompressStore cstor;
 class CloudServer
 {
   public:
@@ -44,18 +46,14 @@ class CloudServer
     //获取文件列表
     static void GetFileList(const Request& req, Response& rsp)
     {
-      bf::path list(SERVER_BACKUP_DIR);
-      bf::directory_iterator item_begin(list);
-      bf::directory_iterator item_end;
+      std::vector<std::string> list;
+      cstor.GetFileList(list);
       std::string body;
       body = "<html><body><ol><hr />";
-      for(; item_begin != item_end; ++item_begin)
+      for(auto i : list)
       {
-        if(bf::is_directory(item_begin->status()))
-        {
-          continue;
-        }
-        std::string file = item_begin->path().filename().string();
+        bf::path path(i);
+        std::string file = path.filename().string();
         std::string uri = "/list/" + file;
         body += "<h4><li>";
         body += "<a href='";
@@ -87,24 +85,7 @@ class CloudServer
       }
       std::cout << "backup file:[" << req.path << "] range:[" << range << "]" <<  std::endl;
       std::string realpath = SERVER_BASE_DIR + req.path;
-      //std::ofstream file(realpath, std::ios::binary | std::ios::trunc);
-      int fd = open(realpath.c_str(), O_CREAT | O_WRONLY, 0664);
-      if(fd < 0)
-      {
-        std::cerr << "open file " << realpath << " error" << std::endl;
-        rsp.status = 500;
-        return;
-      }
-      //文件未成功打开
-      lseek(fd, range_start, SEEK_SET);
-      size_t ret = write(fd, &req.body[0], req.body.size());
-      if(ret != req.body.size())
-      {
-        std::cerr << "file write body error" << std::endl;
-        rsp.status = 500;
-        return;
-      }
-      close(fd);
+      cstor.SetFileData(realpath, req.body, range_start);
     }
     //起始位置解析
     static bool RangeParse(std::string& range, int64_t& start)
@@ -127,32 +108,9 @@ class CloudServer
     //获取文件数据
     static void GetFileData(const Request& req, Response& rsp)
     {
-      std::string file = SERVER_BASE_DIR + req.path;
-      //文件不存在
-      if(!bf::exists(file))
-      {
-        std::cerr << "file not exists" << std::endl;
-        rsp.status = 404;
-        return;
-      }
-      std::ifstream ifile(file, std::ios::binary);
-      //打开文件失败
-      if(!ifile.is_open())
-      {
-        std::cerr << "open file " << file << " error" << std::endl;
-        rsp.status = 500;
-        return;
-      }
       std::string body;
-      int64_t fsize = bf::file_size(file);
-      body.resize(fsize);
-      ifile.read(&body[0], fsize);
-      if(!ifile.good())
-      {
-        std::cerr << "read file " << file << "body error" << std::endl;
-        rsp.status = 500;
-        return;
-      }
+      std::string realpath = SERVER_BASE_DIR + req.path;
+      cstor.GetFileData(realpath, body);
       rsp.set_content(body, "application/octet-stream");
     }
     static void BackupFile(const Request& req, Response& rsp)
@@ -160,8 +118,14 @@ class CloudServer
 
     }
 };
+void thr_start()
+{
+  cstor.LowHeatFileStore();
+}
 int main()
 {
+  std::thread thr(thr_start);
+  thr.detach();
   CloudServer srv;
   srv.Start();
 }

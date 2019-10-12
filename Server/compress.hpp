@@ -1,5 +1,6 @@
 #include <unordered_map>
 #include <iostream>
+#include <sys/file.h>
 #include <vector>
 #include <string>
 #include <thread>
@@ -12,10 +13,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <zlib.h>
-#define UNGZIPFILE_PATH "www/list"
-#define GZIPFILE_PATH "www/zip"
+#define UNGZIPFILE_PATH "www/list/"
+#define GZIPFILE_PATH "www/zip/"
 #define RECORD_FILE "record.list"
-#define HEAT_TIME 3
+#define HEAT_TIME 100
 namespace bf = boost::filesystem;
 //对热度低的文件进行压缩并进行后续处理
 class CompressStore
@@ -86,7 +87,7 @@ class CompressStore
       {
         tmp << i.first << " " << i.second << "\n";
       }
-      std::ofstream file(RECORD_FILE, std::ios::binary);
+      std::ofstream file(RECORD_FILE, std::ios::binary | std::ios::trunc);
       //打开文件失败
       if(!file.is_open())
       {
@@ -142,16 +143,19 @@ class CompressStore
       }
       int ret;
       char buf[1024];
+      //读文件数据，加文件锁
+      flock(fd, LOCK_SH);
       while((ret = read(fd, buf, 1024)) > 0)
       {
         gzwrite(gf, buf, 1024);
       }
+      flock(fd, LOCK_UN);
       close(fd);
       gzclose(gf);
       //压缩成功删除原文件 unlink接口
       unlink(file.c_str());
-      //添加到压缩信息中
-      _file_list[file] = gzip;
+      ////添加到压缩信息中
+      //_file_list[file] = gzip;
       return true;
     }
     //解压缩文件
@@ -171,6 +175,8 @@ class CompressStore
       }
       int ret;
       char buf[1024];
+      //写文件，加文件写锁
+      flock(fd, LOCK_EX);
       while((ret = gzread(gf, buf, 1024)) > 0)
       {
         int len = write(fd, buf, 1024);
@@ -179,35 +185,83 @@ class CompressStore
           std::cerr << "get gzip data failed" << std::endl;
           gzclose(gf);
           close(fd);
+          flock(fd, LOCK_UN);
           return false;
         }
       }
+      flock(fd, LOCK_UN);
       gzclose(gf);
       close(fd);
       unlink(gzip.c_str());
       return true;
     }
+    //获取普通文件的数据放到body中
     bool GetNormalFile(std::string& name, std::string& body)
     {
       int64_t fsize = bf::file_size(name);
       body.resize(fsize);
-      std::ifstream file(name, std::ios::binary);
-      if(!file.is_open())
+      int fd = open(name.c_str(), O_RDONLY);
+      //打开失败
+      if(fd < 0)
       {
         std::cerr << "GetNormalFile(): open file " << name << " failed" << std::endl;
         return false;
       }
-      file.read(&body[0], fsize);
-      if(!file.good())
+      flock(fd, LOCK_SH);
+      int ret = read(fd, &body[0], fsize);
+      flock(fd, LOCK_UN);
+      //读取失败
+      if(ret != fsize)
       {
         std::cerr << "GetNormalFile(): get file " << name << " body failed" << std::endl;
-        file.close();
+        close(fd);
         return false;
       }
-      file.close();
+      close(fd);
+      return true;
+    }
+    //目录检测，获取目录中的文件名
+    //1、判断文件是否需要压缩存储
+    //2、文件压缩存储
+    bool DirectoryCheck()
+    {
+      if(bf::exists(UNGZIPFILE_PATH))
+      {
+        bf::create_directory(UNGZIPFILE_PATH);
+      }
+      bf::directory_iterator item_begin(UNGZIPFILE_PATH);
+      bf::directory_iterator item_end;
+      for(; item_begin != item_end; ++item_begin)
+      {
+        if(bf::is_directory(item_begin->status()))
+        {
+          continue;
+        }
+        std::string name = item_begin->path().string();
+        if(IsNeedCompress(name))
+        {
+          std::string gzip = GZIPFILE_PATH + item_begin->path().filename().string() + ".gz";
+          CompressFile(name, gzip);
+          AddFileRecord(name, gzip);
+        }
+      }
       return true;
     }
   public:
+    CompressStore()
+    {
+      //初始化读写锁
+      pthread_rwlock_init(&_rwlock, NULL);
+      //目录不存在创建压缩目录
+      if(!bf::exists(GZIPFILE_PATH))
+      {
+        bf::create_directory(GZIPFILE_PATH);
+      }
+    }
+    ~CompressStore()
+    {
+      pthread_rwlock_destroy(&_rwlock);
+    }
     //获取文件列表功能
     bool GetFileList(std::vector<std::string>& list)
     {
@@ -220,6 +274,22 @@ class CompressStore
       }
       //解锁
       pthread_rwlock_unlock(&_rwlock);
+      return true;
+    }
+    //通过文件名称获取文件对应的压缩包名称
+    bool GetFileGzip(std::string& file, std::string& gzip)
+    {
+      pthread_rwlock_rdlock(&_rwlock);
+      auto it = _file_list.find(file);
+      if(it == _file_list.end())
+      {
+        pthread_rwlock_unlock(&_rwlock);
+        std::cerr << "GetFileData(): dont have the file " << file << std::endl;
+        return false;
+      }
+      gzip = it->second;
+      pthread_rwlock_unlock(&_rwlock);
+      return true;
     }
     //获取文件数据功能
     bool GetFileData(std::string& file, std::string& body)
@@ -233,25 +303,22 @@ class CompressStore
       {
         //2、压缩文件数据获取
         //获取压缩包名称 gzip
-        auto it = _file_list.find(file);
-        if(it == _file_list.end())
-        {
-          std::cerr << "GetFileData(): dont have the file " << file << std::endl;
-          return false;
-        }
-        std::string gzip = it->second;
+        std::string gzip;
+        GetFileGzip(file, gzip);
         UnCompressFile(gzip, file);
         GetNormalFile(file, body);
       }
+      return true;
     }
-    //数据写入文件指定位置，外部分块写入接口
-    bool AddFileRecord(std::string& file)
+    //添加文件记录信息
+    bool AddFileRecord(const std::string& file, const std::string& gzip)
     {
       pthread_rwlock_wrlock(&_rwlock);
-      _file_list[file] = "";
+      _file_list[file] = gzip;
       pthread_rwlock_unlock(&_rwlock);
     }
-    bool SetFileData(std::string& file, std::string& body, int64_t offset)
+    //数据写入文件指定位置，外部分块写入接口
+    bool SetFileData(const std::string& file, const std::string& body, const int64_t offset)
     {
       int fd = open(file.c_str(), O_CREAT | O_WRONLY, 0664);
       //文件打开失败
@@ -260,26 +327,33 @@ class CompressStore
         std::cerr << "open file " << file << " error" << std::endl;
         return true;
       }
+      flock(fd, LOCK_EX);
       lseek(fd, offset, SEEK_SET);
       int ret = write(fd, &body[0], body.size());
       //写入失败
       if(ret < 0)
       {
         std::cerr << "store file " << file << " data error" << std::endl;
+        flock(fd, LOCK_UN);
         return false;
       }
+      flock(fd, LOCK_UN);
       close(fd);
-      AddFileRecord(file);
+      AddFileRecord(file, "");
       return true;
     }
     //开启线程循环监听目录，对目录下热度低文件进行压缩存储，线程入口函数
     bool LowHeatFileStore()
     {
+      GetListRecord();
       while(1)
       {
         //1、获取list目录下文件名称
         //2、判断文件是否需要进行压缩存储
         //3、对文件进行压缩存储
+        DirectoryCheck();
+        SetListRecord();
+        sleep(3);
       }
     }
 };
