@@ -122,10 +122,10 @@ void thr_start()
 {
   cstor.LowHeatFileStore();
 }
+CloudServer srv;
 int main()
 {
   std::thread thr(thr_start);
   thr.detach();
-  CloudServer srv;
   srv.Start();
 }
