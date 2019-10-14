@@ -31,6 +31,10 @@ class CloudServer
       {
         bf::create_directory(list_path);
       }
+      if(!bf::exists(GZIPFILE_PATH))
+      {
+        bf::create_directory(GZIPFILE_PATH);
+      }
     }
     bool Start()
     {
@@ -122,9 +126,9 @@ void thr_start()
 {
   cstor.LowHeatFileStore();
 }
-CloudServer srv;
 int main()
 {
+  CloudServer srv;
   std::thread thr(thr_start);
   thr.detach();
   srv.Start();

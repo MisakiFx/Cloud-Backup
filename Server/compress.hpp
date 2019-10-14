@@ -252,11 +252,11 @@ class CompressStore
     {
       //初始化读写锁
       pthread_rwlock_init(&_rwlock, NULL);
-      //目录不存在创建压缩目录
-      if(!bf::exists(GZIPFILE_PATH))
-      {
-        bf::create_directory(GZIPFILE_PATH);
-      }
+      ////目录不存在创建压缩目录
+      //if(!bf::exists(GZIPFILE_PATH))
+      //{
+      //  bf::create_directory(GZIPFILE_PATH);
+      //}
     }
     ~CompressStore()
     {
