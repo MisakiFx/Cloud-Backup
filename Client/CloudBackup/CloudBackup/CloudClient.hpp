@@ -7,16 +7,31 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+//#include <windows.h>
+#include <string.h>
 #include "httplib.h"
 #define CLIENT_BACKUP_DIR ".\\backup"
 #define CLIENT_BACKUP_INFO_FILE ".\\back.list"
 #define RANGE_MAX_SIZE (10 << 20)//·Ö¿é´óÐ¡
-#define SERVER_IP "192.168.239.128"
+#define SERVER_IP "192.168.239.132"
 #define SERVER_PORT 9000
 #define BACKUP_URI "/list/"
 namespace bf = boost::filesystem;
 
-
+char *G2U(const char* gb2312)
+{
+	int len = MultiByteToWideChar(CP_ACP, 0, gb2312, -1, NULL, 0);
+	wchar_t *wstr = new wchar_t[len + 1];
+	memset(wstr, 0, len + 1);
+	MultiByteToWideChar(CP_ACP, 0, gb2312, -1, wstr, len);
+	len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
+	char *str = new char[len + 1];
+	memset(str, 0, len + 1);
+	WideCharToMultiByte(CP_UTF8, 0, wstr, -1, str, len, NULL, NULL);
+	if (wstr)
+		delete[] wstr;
+	return str;
+}
 class ThrBackUp
 {
 private:
@@ -55,7 +70,9 @@ public:
 		}
 		path.close();
 		bf::path name(_file);
-		std::string uri = BACKUP_URI + name.filename().string();
+		char*str = G2U(name.filename().string().c_str());
+		std::string utf8Name = str;
+		std::string uri = BACKUP_URI + utf8Name;
 		httplib::Client cli(SERVER_IP, SERVER_PORT);
 		httplib::Headers hdr;
 		hdr.insert(std::make_pair("Content-Length", std::to_string(_range_len)));
@@ -69,12 +86,14 @@ public:
 			std::stringstream ss;
 			ss << "backup file [" << _file << "] range:[" << _range_start << "-" << _range_len << "] backup failed!" << std::endl;
 			std::cout << ss.str();
+			delete[] str;
 			return;
 		}
 		std::stringstream ss;
 		ss << "backup file [" << _file << "] range:[" << _range_start << "-" << _range_len << "] backup success!" << std::endl;
 		std::cout << ss.str();
 		return;
+		delete[] str;
 	}
 };
 class CloudClient
