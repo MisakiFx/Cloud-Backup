@@ -147,7 +147,7 @@ class CompressStore
       flock(fd, LOCK_SH);
       while((ret = read(fd, buf, 1024)) > 0)
       {
-        gzwrite(gf, buf, 1024);
+        gzwrite(gf, buf, ret);
       }
       flock(fd, LOCK_UN);
       close(fd);
@@ -179,7 +179,7 @@ class CompressStore
       flock(fd, LOCK_EX);
       while((ret = gzread(gf, buf, 1024)) > 0)
       {
-        int len = write(fd, buf, 1024);
+        int len = write(fd, buf, ret);
         if(len < 0)
         {
           std::cerr << "get gzip data failed" << std::endl;
